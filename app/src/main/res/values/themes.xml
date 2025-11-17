@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme. -->
+    <style name="Theme.SecretDiary" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- The starting theme. This is applied to your activity before system surfaces
+         draw, and then replaced by your normal theme. -->
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <!-- Set the splash screen background -->
+        <item name="windowSplashScreenBackground">#FFFFFF</item>
+
+        <!-- Use a icon. -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_icon</item>
+
+        <!-- Set the theme of the Activity that follows your splash screen. -->
+        <item name="postSplashScreenTheme">@style/Theme.SecretDiary</item>
+    </style>
+</resources>
