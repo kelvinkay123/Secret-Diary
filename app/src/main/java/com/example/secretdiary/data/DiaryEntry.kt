@@ -1,7 +1,9 @@
 package com.example.secretdiary.data
 
+
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+
 
 @Entity(tableName = "diary_entries")
 data class DiaryEntry(
@@ -9,5 +11,6 @@ data class DiaryEntry(
     val id: Int = 0,
     val title: String,
     val content: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val imageUri: String? = null // NEW: store an image URI (nullable)
 )

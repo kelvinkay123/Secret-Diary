@@ -53,11 +53,18 @@ android {
 
 dependencies {
 
-    // Updated core libraries
-    implementation("androidx.core:core-ktx:1.13.1")
+    // Updated core librariesimplementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.9.0")
 
+    // CameraX
+    val cameraXVersion = "1.4.0-alpha01" // Use a specific, stable version
+    implementation("androidx.camera:camera-core:${cameraXVersion}")
+    implementation("androidx.camera:camera-camera2:${cameraXVersion}")
+    implementation("androidx.camera:camera-lifecycle:${cameraXVersion}")
+    implementation("androidx.camera:camera-view:1.3.3") // Updated to a more recent version
+    // activity-ktx is already included transitively by activity-compose, but explicitly adding it is fine.
+    implementation("androidx.activity:activity-ktx:1.9.0")
 
     // Update Compose BOM (Bill of Materials)
     // This controls all androidx.compose versions
@@ -85,6 +92,9 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1") // Use ksp instead of kapt
+
+    // Coil for image loading
+    implementation("io.coil-kt:coil-compose:2.6.0")
 
     // Test libraries (no major changes needed, but update BOM)
     testImplementation("junit:junit:4.13.2")

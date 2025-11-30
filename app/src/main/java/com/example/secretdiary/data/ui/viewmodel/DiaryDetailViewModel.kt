@@ -5,72 +5,71 @@ import androidx.lifecycle.viewModelScope
 import com.example.secretdiary.data.DiaryEntry
 import com.example.secretdiary.data.DiaryRepository
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class DiaryDetailViewModel(private val repository: DiaryRepository) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(DiaryDetailUiState())
-    val uiState: StateFlow<DiaryDetailUiState> = _uiState
+        private val _entry = MutableStateFlow<DiaryEntry?>(null)
+        val entry = _entry.asStateFlow()
 
-    fun loadEntry(entryId: Int) {
-        if (entryId == -1) {
-            _uiState.value = DiaryDetailUiState()
-            return
-        }
+        // FIX: Initialize the image URI StateFlow with a default empty string.
+        private val _imageUri = MutableStateFlow("")
+        val imageUri = _imageUri.asStateFlow()
 
-        viewModelScope.launch {
-            repository.getEntryById(entryId).first { entry ->
-                entry?.let {
-                    _uiState.value = DiaryDetailUiState(
-                        id = it.id,
-                        title = it.title,
-                        content = it.content,
-                        isEntryFound = true
-                    )
+    fun loadEntry(id: Int) {
+        if (id != -1) {
+            viewModelScope.launch {
+                // Using .collect() is better for observing database changes in real-time
+                repository.getEntryById(id).collect { diaryEntry ->
+                    _entry.value = diaryEntry
+                    val uri = extractUriFromContent(diaryEntry?.content)
+                    if (uri != null) {
+                        _imageUri.value = uri
+                    }
                 }
-                true
             }
         }
     }
 
-    fun updateTitle(title: String) {
-        _uiState.value = _uiState.value.copy(title = title)
+    fun onTitleChange(newTitle: String) {
+        // FIX: Added the missing 'timestamp' parameter
+        val currentTime = System.currentTimeMillis()
+        _entry.value = _entry.value?.copy(title = newTitle) ?: DiaryEntry(title = newTitle, content = "", timestamp = currentTime)
     }
 
-    fun updateContent(content: String) {
-        _uiState.value = _uiState.value.copy(content = content)
+    fun onContentChange(newContent: String) {
+        // FIX: Added the missing 'timestamp' parameter
+        val currentTime = System.currentTimeMillis()
+        _entry.value = _entry.value?.copy(content = newContent) ?: DiaryEntry(title = "", content = newContent, timestamp = currentTime)
     }
 
-    fun saveEntry(onSaveFinished: () -> Unit) {
+    fun onImageUriChange(uri: String) {
+        _imageUri.value = uri
+        val currentContent = _entry.value?.content ?: ""
+        // Avoid adding duplicate image tags
+        if (!currentContent.contains(uri)) {
+            val newContent = "$currentContent\n[Image: $uri]".trim()
+            onContentChange(newContent)
+        }
+    }
+
+    fun saveEntry() {
         viewModelScope.launch {
-            val state = _uiState.value
-            if (state.title.isBlank() || state.content.isBlank()) {
-                // Show an error message or similar
-                return@launch
+            _entry.value?.let {
+                // Ensure timestamp is set for new entries
+                val entryToSave = if (it.id == 0 && it.timestamp == 0L) {
+                    it.copy(timestamp = System.currentTimeMillis())
+                } else {
+                    it
+                }
+                repository.insert(entryToSave)
             }
-
-            val entry = DiaryEntry(
-                id = state.id,
-                title = state.title,
-                content = state.content,
-                timestamp = System.currentTimeMillis()
-            )
-
-            if (state.id == 0) {
-                repository.insert(entry)
-            } else {
-                repository.update(entry)
-            }
-            onSaveFinished()
         }
+    }
+
+    private fun extractUriFromContent(content: String?): String? {
+        return content?.lines()?.find { it.startsWith("[Image:") && it.endsWith("]") }
+            ?.removePrefix("[Image:")?.removeSuffix("]")?.trim()
     }
 }
-
-data class DiaryDetailUiState(
-    val id: Int = 0,
-    val title: String = "",
-    val content: String = "",
-    val isEntryFound: Boolean = false
-)

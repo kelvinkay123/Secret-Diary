@@ -24,4 +24,7 @@ interface DiaryDao {
 
     @Query("SELECT * FROM diary_entries WHERE id = :id")
     fun getEntryById(id: Int): Flow<DiaryEntry?>
+
+    @Query("UPDATE diary_entries SET title = :title, content = :content, timestamp = :timestamp, imageUri = :imageUri WHERE id = :id")
+    fun updateEntry(id: Int, title: String, content: String, timestamp: Long, imageUri: String?)
 }

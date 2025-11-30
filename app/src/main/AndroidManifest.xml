@@ -3,7 +3,17 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Declare that the camera is an optional feature, not a requirement -->
+    <!-- FIX: Added <uses-feature> to resolve the warning -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- for saving images to external storage on older versions -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- for Android 13+ reading/writing media, you will request READ_MEDIA_IMAGES at runtime if needed -->
+
 
     <application
         android:name=".DiaryApplication"
