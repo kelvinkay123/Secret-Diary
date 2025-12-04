@@ -55,7 +55,7 @@ fun DiaryListScreen(
     onAddEntry: () -> Unit,
     onEntryClick: (Int) -> Unit
 ) {
-    // FIX: Instead of collecting here, we will read the state inside the Column's content block.
+    // FIX: Instead of collecting here, we will collect inside the composable that uses the data.
     // This change resolves the performance warning.
     val entriesState by viewModel.allEntries.collectAsState()
 
@@ -107,7 +107,8 @@ fun DiaryListScreen(
                     .padding(16.dp)
             )
 
-            // We now read the state here, so only this part of the UI recomposes on list changes.
+            // We read the state here. Now, only this lower part of the Column
+            // will recompose when the list changes, not the whole screen.
             val filteredList = entriesState.filter {
                 it.title.contains(searchQuery, ignoreCase = true) ||
                         it.content.contains(searchQuery, ignoreCase = true)
@@ -119,7 +120,7 @@ fun DiaryListScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        // Check against the original unfiltered list for the "empty diary" message
+                        // Check against the unfiltered list for the "empty diary" message
                         text = if (entriesState.isEmpty())
                             "Your diary is empty. Tap '+' to add a new entry."
                         else
