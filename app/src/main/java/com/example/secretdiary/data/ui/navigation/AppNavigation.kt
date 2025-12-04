@@ -39,13 +39,13 @@ fun AppNavigation(
                 },
                 onAuthRequested = {
                     // FIX: Re-enabled the biometric prompt functionality
-//                    onShowBiometricPrompt {
+                    onShowBiometricPrompt {
                         // This is the onSuccess callback for biometrics
                         navController.navigate(Screen.DiaryList.route) {
                             popUpTo(Screen.Auth.route) { inclusive = true }
                         }
                     }
-//                }
+                }
             )
         }
 

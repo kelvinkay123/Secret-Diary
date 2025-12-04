@@ -44,9 +44,14 @@ android {
         // Update Compose Compiler to match Kotlin 1.9.24
         kotlinCompilerExtensionVersion = "1.5.11"
     }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        // ADD THIS PART TO YOUR EXISTING PACKAGING BLOCK
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 }
