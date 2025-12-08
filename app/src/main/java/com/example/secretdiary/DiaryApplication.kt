@@ -1,8 +1,8 @@
 package com.example.secretdiary
 
 import android.app.Application
-import com.example.secretdiary.data.DiaryDatabase
-import com.example.secretdiary.data.DiaryRepository
+import com.example.secretdiary.ui.viewmodel.DiaryDatabase
+import com.example.secretdiary.ui.viewmodel.DiaryRepository
 
 class DiaryApplication : Application() {
     // Using by lazy so the database and repository are only created when they're needed
