@@ -1,8 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Declare that the camera is an optional feature, not a requirement -->
+    <!-- FIX: Added <uses-feature> to resolve the warning -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- for saving images to external storage on older versions -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- for Android 13+ reading/writing media, you will request READ_MEDIA_IMAGES at runtime if needed -->
+
+
     <application
+        android:name=".DiaryApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -12,17 +26,20 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SecretDiary"
         tools:targetApi="31">
+
+        <!-- FIX: The <activity> tag MUST be a direct child of <application> -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:theme="@style/Theme.SecretDiary">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-    </application>
+
+        <!-- Other activities or services would also go here -->
+
+    </application> <!-- The application tag closes after all its children -->
 
 </manifest>
