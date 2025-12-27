@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import com.example.secretdiary.ui.viewmodel.DiaryEntry
+import com.example.secretdiary.ui.theme.viewmodel.DiaryEntry
 
 @Database(entities = [DiaryEntry::class], version = 2, exportSchema = false, autoMigrations = [])
 abstract class DiaryDatabase : RoomDatabase() {

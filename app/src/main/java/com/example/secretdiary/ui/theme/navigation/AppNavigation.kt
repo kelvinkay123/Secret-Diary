@@ -7,10 +7,18 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import com.example.secretdiary.ui.theme.screen.*
-import com.example.secretdiary.ui.theme.viewmodel.*
+import com.example.secretdiary.ui.theme.screen.AuthScreen
+import com.example.secretdiary.ui.theme.screen.BiometricUnlockScreen
+import com.example.secretdiary.ui.theme.screen.CameraScreen
+import com.example.secretdiary.ui.theme.screen.DiaryDetailScreen
+import com.example.secretdiary.ui.theme.screen.DiaryListScreen
+import com.example.secretdiary.ui.theme.screen.LoginScreen
+import com.example.secretdiary.ui.theme.screen.SignupScreen
+import com.example.secretdiary.ui.theme.viewmodel.ViewModelFactory
 
+// -------------------- SCREENS --------------------
 sealed class Screen(val route: String) {
+    data object Auth : Screen("auth")
     data object Login : Screen("login")
     data object Signup : Screen("signup")
     data object Biometric : Screen("biometric")
@@ -18,9 +26,14 @@ sealed class Screen(val route: String) {
     data object DiaryDetail : Screen("diary_detail")
     data object Camera : Screen("camera")
 
-    fun diaryDetailRoute(entryId: Int) = "${DiaryDetail.route}/$entryId"
+    companion object {
+        fun diaryDetailRoute(entryId: Int): String {
+            return "${DiaryDetail.route}/$entryId"
+        }
+    }
 }
 
+// -------------------- NAVIGATION --------------------
 @Composable
 fun AppNavigation(
     navController: NavHostController,
@@ -29,8 +42,22 @@ fun AppNavigation(
 ) {
     NavHost(
         navController = navController,
-        startDestination = Screen.Login.route
+        startDestination = Screen.Auth.route
     ) {
+
+        // ---------- AUTH ----------
+        composable(Screen.Auth.route) {
+            AuthScreen(
+                onAuthSuccess = {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(Screen.Auth.route) { inclusive = true }
+                    }
+                },
+                onAuthRequested = {
+                    navController.navigate(Screen.Biometric.route)
+                }
+            )
+        }
 
         // ---------- LOGIN ----------
         composable(Screen.Login.route) {
@@ -86,7 +113,9 @@ fun AppNavigation(
             DiaryDetailScreen(
                 viewModel = viewModel(factory = viewModelFactory),
                 entryId = entryId,
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
                 onOpenCamera = {
                     navController.navigate(Screen.Camera.route)
                 },

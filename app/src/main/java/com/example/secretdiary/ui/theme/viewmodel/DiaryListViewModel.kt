@@ -2,8 +2,8 @@ package com.example.secretdiary.ui.theme.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.secretdiary.ui.viewmodel.DiaryEntry
-import com.example.secretdiary.ui.viewmodel.DiaryRepository
+import com.example.secretdiary.ui.theme.viewmodel.DiaryEntry
+import com.example.secretdiary.ui.theme.viewmodel.DiaryRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn

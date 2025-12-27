@@ -20,10 +20,11 @@ import com.example.secretdiary.ui.theme.SecretDiaryTheme
 import com.google.firebase.auth.FirebaseAuth
 
 @Composable
-fun LoginScreen(navController: NavController) {
+fun SignupScreen(navController: NavController) {
 
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
     var isLoading by rememberSaveable { mutableStateOf(false) }
 
     val context = LocalContext.current
@@ -37,7 +38,7 @@ fun LoginScreen(navController: NavController) {
     ) {
 
         Text(
-            text = "Login",
+            text = "Sign Up",
             style = MaterialTheme.typography.headlineLarge,
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center
@@ -67,6 +68,21 @@ fun LoginScreen(navController: NavController) {
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Next
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = confirmPassword,
+            onValueChange = { confirmPassword = it },
+            label = { Text("Confirm Password") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done
             ),
             modifier = Modifier.fillMaxWidth()
@@ -76,24 +92,34 @@ fun LoginScreen(navController: NavController) {
 
         Button(
             onClick = {
-                if (email.isNotBlank() && password.isNotBlank()) {
+                if (email.isNotBlank() && password.length >= 6 && password == confirmPassword) {
                     isLoading = true
+
                     val auth = FirebaseAuth.getInstance()
-                    auth.signInWithEmailAndPassword(email, password)
+                    auth.createUserWithEmailAndPassword(email, password)
                         .addOnCompleteListener { task ->
                             isLoading = false
                             if (task.isSuccessful) {
-                                Toast.makeText(context, "Login successful!", Toast.LENGTH_SHORT).show()
-                                navController.navigate(Screen.Biometric.route) {
-                                    popUpTo(Screen.Login.route) { inclusive = true }
+                                Toast.makeText(
+                                    context,
+                                    "Account created successfully!",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                navController.navigate(Screen.Login.route) {
+                                    popUpTo(Screen.Signup.route) { inclusive = true }
                                 }
                             } else {
-                                val message = task.exception?.localizedMessage ?: "Login failed"
+                                val message = task.exception?.localizedMessage
+                                    ?: "Signup failed"
                                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                             }
                         }
                 } else {
-                    Toast.makeText(context, "Please enter email and password", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        context,
+                        "Passwords must match and be at least 6 characters",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             },
             enabled = !isLoading,
@@ -105,7 +131,7 @@ fun LoginScreen(navController: NavController) {
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(if (isLoading) "Logging in..." else "Login")
+                Text(if (isLoading) "Creating account..." else "Sign Up")
             }
         }
 
@@ -113,19 +139,19 @@ fun LoginScreen(navController: NavController) {
 
         TextButton(
             onClick = {
-                navController.navigate(Screen.Signup.route)
+                navController.popBackStack()
             }
         ) {
-            Text("Don't have an account? Sign up")
+            Text("Already have an account? Login")
         }
     }
 }
 
 @Preview(showBackground = true, showSystemUi = true)
 @Composable
-fun LoginScreenPreview() {
+fun SignupScreenPreview() {
     val navController = rememberNavController()
     SecretDiaryTheme {
-        LoginScreen(navController = navController)
+        SignupScreen(navController = navController)
     }
 }
