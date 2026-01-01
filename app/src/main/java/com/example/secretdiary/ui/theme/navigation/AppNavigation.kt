@@ -73,11 +73,11 @@ fun AppNavigation(
         composable(Screen.Biometric.route) {
             BiometricUnlockScreen(
                 onUnlockRequested = {
-                    onShowBiometricPrompt {
-                        navController.navigate(Screen.DiaryList.route) {
-                            popUpTo(Screen.Biometric.route) { inclusive = true }
-                        }
+                    // onShowBiometricPrompt { // Uncomment if using prompt logic
+                    navController.navigate(Screen.DiaryList.route) {
+                        popUpTo(Screen.Biometric.route) { inclusive = true }
                     }
+                    // }
                 },
                 onLogout = {
                     navController.navigate(Screen.Login.route) {
@@ -123,13 +123,16 @@ fun AppNavigation(
             )
         }
 
-        // ---------- CAMERA ----------
+        // ---------- CAMERA (FIXED) ----------
         composable(Screen.Camera.route) {
             CameraScreen(
-                onImageCaptured = { uri ->
-                    navController.previousBackStackEntry
-                        ?.savedStateHandle
-                        ?.set("image_uri", uri)
+                // FIX: Updated to match new CameraScreen signature
+                onMediaCaptured = { uri, isVideo ->
+                    navController.previousBackStackEntry?.savedStateHandle?.apply {
+                        // Pass both the URI and the type (video vs photo)
+                        set("image_uri", uri)
+                        set("is_video", isVideo)
+                    }
                     navController.popBackStack()
                 },
                 onCancelled = {

@@ -9,12 +9,13 @@ plugins {
 
 android {
     namespace = "com.example.secretdiary"
-    compileSdk = 35
+
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.secretdiary"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -26,11 +27,12 @@ android {
 
     buildFeatures {
         compose = true
+        // buildConfig = true // Uncomment if you need BuildConfig.DEBUG access
     }
 
     composeOptions {
         // This specific version is required for Kotlin 1.9.22
-        kotlinCompilerExtensionVersion = "1.5.10"
+        kotlinCompilerExtensionVersion = "1.5.8"
     }
 
     buildTypes {
@@ -42,15 +44,16 @@ android {
             )
         }
     }
+
+    // UPDATED: Modern Android development requires Java 17
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
     }
 
-    // FIX: packaging moved INSIDE the android block
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -62,14 +65,13 @@ android {
 }
 
 dependencies {
-    // Core, Lifecycle, and Splash Screen
+    // --- Core & Lifecycle ---
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.splashscreen)
-    implementation(libs.firebase.auth)
 
-    // Compose
+    // --- Compose UI ---
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
@@ -79,38 +81,40 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
-    // CameraX
+    // --- CameraX (Video support included) ---
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.video) // Essential for your video feature
     implementation(libs.androidx.camera.view)
 
-    // Room Database
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    // Note: firebase.auth was removed here (it was a duplicate)
+    // --- Firebase & Auth ---
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0")) // Recommended to use BOM
+    implementation(libs.firebase.auth)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
+
+    // --- Local Database (Room) ---
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-    // Biometrics (Fingerprint)
+    // --- Hardware Features ---
     implementation(libs.androidx.biometric)
-
-    // Location
     implementation(libs.google.play.services.location)
 
-    // Coil for image loading
+    // --- Image Loading ---
     implementation(libs.coil.compose)
 
-    // Testing
+    // --- Testing ---
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 
-    // Debug
+    // --- Debugging ---
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
