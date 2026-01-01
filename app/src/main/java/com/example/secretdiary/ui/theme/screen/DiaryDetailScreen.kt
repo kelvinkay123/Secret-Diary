@@ -7,20 +7,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -74,6 +73,9 @@ fun DiaryDetailScreen(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { isGranted ->
             hasLocationPermission = isGranted
+            if (isGranted) {
+                viewModel.loadLocation()
+            }
         }
     )
 
@@ -87,14 +89,14 @@ fun DiaryDetailScreen(
         savedStateHandle?.getLiveData<String>("image_uri")?.observeForever { uri ->
             if (uri != null) {
                 viewModel.onImageUriChange(uri)
-                if (hasLocationPermission) {
-                    viewModel.loadLocation()
-                } else {
-                    locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                }
                 savedStateHandle.remove<String>("image_uri")
             }
         }
+
+        savedStateHandle?.getLiveData<Boolean>("is_video")?.observeForever { _ ->
+            savedStateHandle.remove<Boolean>("is_video")
+        }
+
         if (hasLocationPermission && entry?.latitude == null) {
             viewModel.loadLocation()
         }
@@ -108,8 +110,41 @@ fun DiaryDetailScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                },
+                actions = {
+                    val isLocationSet = entry?.latitude != null || location != null
+
+                    IconButton(onClick = {
+                        if (hasLocationPermission) {
+                            viewModel.loadLocation()
+                        } else {
+                            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = "Get Location",
+                            // CHANGE: Added modifier to increase size to 32.dp (default is 24.dp)
+                            modifier = Modifier.size(32.dp),
+                            tint = if (isLocationSet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             )
+        },
+        bottomBar = {
+            BottomAppBar {
+                Button(
+                    onClick = onOpenCamera,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                ) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = "Open Camera")
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Add Photo / Video")
+                }
+            }
         },
         floatingActionButton = {
             FloatingActionButton(onClick = {
@@ -124,8 +159,7 @@ fun DiaryDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()), // Make the column scrollable
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             OutlinedTextField(
@@ -135,57 +169,38 @@ fun DiaryDetailScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            val locationText = when {
+                entry?.latitude != null -> "📍 ${entry?.latitude}, ${entry?.longitude}"
+                location != null -> "📍 ${location?.latitude}, ${location?.longitude}"
+                else -> null
+            }
+            if (locationText != null) {
+                Text(
+                    text = locationText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+
+            // Expanded Text Field
             OutlinedTextField(
                 value = entry?.content ?: "",
                 onValueChange = { viewModel.onContentChange(it) },
                 label = { Text("What's on your mind?") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .weight(1f) // Fills remaining vertical space
             )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Button(onClick = onOpenCamera, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = "Open Camera")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add Photo")
-                }
-
-                Button(
-                    onClick = { locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
-                    modifier = Modifier.weight(1f),
-                    enabled = entry?.latitude == null
-                ) {
-                    Icon(Icons.Default.LocationOn, contentDescription = "Get Location")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Get Location")
-                }
-            }
-
-            val locationText = when {
-                entry?.latitude != null -> "Location Saved: ${entry?.latitude}, ${entry?.longitude}"
-                location != null -> "Current Location: ${location?.latitude}, ${location?.longitude}"
-                else -> null
-            }
-            if (locationText != null) {
-                Text(
-                    text = locationText,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
 
             imageUri?.let { uri ->
                 if (uri.isNotEmpty()) {
                     AsyncImage(
                         model = uri,
-                        contentDescription = "Captured image",
+                        contentDescription = "Captured media",
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(200.dp)
+                            .height(150.dp)
                     )
                 }
             }
