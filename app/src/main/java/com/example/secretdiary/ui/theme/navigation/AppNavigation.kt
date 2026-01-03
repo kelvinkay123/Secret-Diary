@@ -73,11 +73,11 @@ fun AppNavigation(
         composable(Screen.Biometric.route) {
             BiometricUnlockScreen(
                 onUnlockRequested = {
-                    // onShowBiometricPrompt { // Uncomment if using prompt logic
+                     onShowBiometricPrompt { // Uncomment if using prompt logic
                     navController.navigate(Screen.DiaryList.route) {
                         popUpTo(Screen.Biometric.route) { inclusive = true }
                     }
-                    // }
+                     }
                 },
                 onLogout = {
                     navController.navigate(Screen.Login.route) {

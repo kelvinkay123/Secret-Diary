@@ -1,15 +1,14 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    // KSP version must match Kotlin 1.9.22 specifically
-    id("com.google.devtools.ksp") version "1.9.22-1.0.17"
-    // Standard Google Services version
-    id("com.google.gms.google-services") version "4.4.1"
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.google.gms.google.services)
 }
+
 
 android {
     namespace = "com.example.secretdiary"
-
     compileSdk = 36
 
     defaultConfig {
@@ -20,20 +19,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        vectorDrawables {
-            useSupportLibrary = true
-        }
+        vectorDrawables { useSupportLibrary = true }
     }
 
-    buildFeatures {
-        compose = true
-        // buildConfig = true // Uncomment if you need BuildConfig.DEBUG access
-    }
+    buildFeatures { compose = true }
 
-    composeOptions {
-        // This specific version is required for Kotlin 1.9.22
-        kotlinCompilerExtensionVersion = "1.5.8"
-    }
+    // composeOptions removed: handled by org.jetbrains.kotlin.plugin.compose
 
     buildTypes {
         release {
@@ -45,22 +36,24 @@ android {
         }
     }
 
-    // UPDATED: Modern Android development requires Java 17
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 
     packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-        jniLibs {
-            useLegacyPackaging = false
-        }
+        resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+        jniLibs { useLegacyPackaging = false }
+    }
+}
+
+/**
+ * ✅ Fix for:
+ * "Using 'jvmTarget: String' is an error. Please migrate to the compilerOptions DSL."
+ */
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -70,6 +63,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.splashscreen)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
 
     // --- Compose UI ---
     implementation(platform(libs.androidx.compose.bom))
@@ -81,15 +76,17 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
-    // --- CameraX (Video support included) ---
+    // --- CameraX ---
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.video) // Essential for your video feature
+    implementation(libs.androidx.camera.video)
     implementation(libs.androidx.camera.view)
+    implementation(libs.androidx.concurrent.futures)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
     // --- Firebase & Auth ---
-    implementation(platform("com.google.firebase:firebase-bom:33.7.0")) // Recommended to use BOM
+    implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
@@ -100,11 +97,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-    // --- Hardware Features ---
+    // --- Hardware & Images ---
     implementation(libs.androidx.biometric)
     implementation(libs.google.play.services.location)
-
-    // --- Image Loading ---
     implementation(libs.coil.compose)
 
     // --- Testing ---

@@ -1,21 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Declare that the camera is an optional feature, not a requirement -->
-    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Camera hardware is optional (app can run without it) -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
+    <!-- Location -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+    <!-- Biometrics -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <!-- Camera / Video -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- for saving images to external storage on older versions -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
-    <!-- for Android 13+ reading/writing media, you will request READ_MEDIA_IMAGES at runtime if needed -->
-
+    <!-- Legacy external storage write (Android 9 / API 28 and below) -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <application
         android:name=".DiaryApplication"
@@ -29,7 +35,6 @@
         android:theme="@style/Theme.SecretDiary"
         tools:targetApi="31">
 
-        <!-- FIX: The <activity> tag MUST be a direct child of <application> -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -40,8 +45,5 @@
             </intent-filter>
         </activity>
 
-        <!-- Other activities or services would also go here -->
-
-    </application> <!-- The application tag closes after all its children -->
-
+    </application>
 </manifest>

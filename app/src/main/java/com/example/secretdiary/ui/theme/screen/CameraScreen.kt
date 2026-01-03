@@ -27,13 +27,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -43,44 +37,55 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 
 @Composable
 fun CameraScreen(
-    onMediaCaptured: (Uri, Boolean) -> Unit, // Boolean is true if Video, false if Image
+    onMediaCaptured: (Uri, Boolean) -> Unit, // true = video, false = image
     onCancelled: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // UI States
     var isVideoMode by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var activeRecording: Recording? by remember { mutableStateOf(null) }
 
-    // CameraX Use Cases
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+    val permissions = arrayOf(
+        Manifest.permission.CAMERA,
+        Manifest.permission.RECORD_AUDIO
+    )
+    var hasPermissions by remember { mutableStateOf(false) }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { map ->
+        hasPermissions = map.values.all { it }
+        if (!hasPermissions) onCancelled()
+    }
+
+    LaunchedEffect(Unit) {
+        hasPermissions = permissions.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (!hasPermissions) launcher.launch(permissions)
+    }
+
     val imageCapture = remember { ImageCapture.Builder().build() }
 
-    // Video Recorder setup
     val recorder = remember {
         Recorder.Builder()
             .setQualitySelector(QualitySelector.from(Quality.HIGHEST))
@@ -88,69 +93,55 @@ fun CameraScreen(
     }
     val videoCapture = remember { VideoCapture.withOutput(recorder) }
 
-    // Permissions (Camera + Audio)
-    val permissions = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions(),
-        onResult = { permissionsMap ->
-            if (permissionsMap.values.all { it }) {
-                // All permissions granted
-            } else {
-                onCancelled()
-            }
-        }
-    )
-
-    LaunchedEffect(Unit) {
-        if (permissions.any { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }) {
-            launcher.launch(permissions)
-        }
-    }
+    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 1. Camera Preview
-        AndroidView(
-            factory = { ctx ->
-                val previewView = PreviewView(ctx)
-                previewView
-            },
-            update = { previewView ->
-                val cameraProvider = cameraProviderFuture.get()
-                val preview = Preview.Builder().build().also {
-                    // FIX: Use the explicit setter method
-                    it.surfaceProvider = previewView.surfaceProvider
+
+        if (hasPermissions) {
+            AndroidView(
+                factory = { ctx -> PreviewView(ctx) },
+                modifier = Modifier.fillMaxSize(),
+                update = { previewView ->
+                    cameraProviderFuture.addListener({
+                        val cameraProvider = cameraProviderFuture.get()
+                        val preview = Preview.Builder().build()
+                        // ✅ setter method (fixes warning)
+                        preview.surfaceProvider = previewView.surfaceProvider
+
+                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                        try {
+                            cameraProvider.unbindAll()
+
+                            if (isVideoMode) {
+                                cameraProvider.bindToLifecycle(
+                                    lifecycleOwner,
+                                    cameraSelector,
+                                    preview,
+                                    videoCapture
+                                )
+                            } else {
+                                cameraProvider.bindToLifecycle(
+                                    lifecycleOwner,
+                                    cameraSelector,
+                                    preview,
+                                    imageCapture
+                                )
+                            }
+                        } catch (e: Exception) {
+                            Log.e("CameraScreen", "Use case binding failed", e)
+                            Toast.makeText(context, "Camera error: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }, ContextCompat.getMainExecutor(context))
                 }
-                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+            )
+        } else {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Requesting camera permission...", color = Color.White)
+            }
+        }
 
-                try {
-                    // Unbind everything before rebinding to switch modes safely
-                    cameraProvider.unbindAll()
-
-                    if (isVideoMode) {
-                        // Bind Video
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            cameraSelector,
-                            preview,
-                            videoCapture
-                        )
-                    } else {
-                        // Bind Photo
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            cameraSelector,
-                            preview,
-                            imageCapture
-                        )
-                    }
-                } catch (e: Exception) {
-                    Log.e("CameraScreen", "Use case binding failed", e)
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // 2. Controls UI (Overlay)
+        // Controls
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -159,7 +150,6 @@ fun CameraScreen(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
 
-                // Mode Switcher (Photo / Video)
                 if (!isRecording) {
                     Row(
                         modifier = Modifier
@@ -173,8 +163,8 @@ fun CameraScreen(
                                 .padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = if(!isVideoMode) Color.Yellow else Color.White)
-                            if(!isVideoMode) Text(" Photo", color = Color.Yellow, fontSize = 12.sp)
+                            Icon(Icons.Default.PhotoCamera, null, tint = if (!isVideoMode) Color.Yellow else Color.White)
+                            if (!isVideoMode) Text(" Photo", color = Color.Yellow, fontSize = 12.sp)
                         }
 
                         Row(
@@ -183,32 +173,32 @@ fun CameraScreen(
                                 .padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Videocam, contentDescription = null, tint = if(isVideoMode) Color.Yellow else Color.White)
-                            if(isVideoMode) Text(" Video", color = Color.Yellow, fontSize = 12.sp)
+                            Icon(Icons.Default.Videocam, null, tint = if (isVideoMode) Color.Yellow else Color.White)
+                            if (isVideoMode) Text(" Video", color = Color.Yellow, fontSize = 12.sp)
                         }
                     }
                 }
 
-                // Shutter / Record Button
                 IconButton(
                     onClick = {
+                        if (!hasPermissions) return@IconButton
+
                         if (isVideoMode) {
                             if (isRecording) {
-                                // STOP RECORDING
                                 activeRecording?.stop()
+                                activeRecording = null
                                 isRecording = false
                             } else {
-                                // START RECORDING
                                 isRecording = true
                                 activeRecording = recordVideo(context, videoCapture) { uri ->
+                                    activeRecording = null
                                     isRecording = false
-                                    onMediaCaptured(uri, true) // True = Video
+                                    onMediaCaptured(uri, true)
                                 }
                             }
                         } else {
-                            // TAKE PHOTO
                             takePhoto(context, imageCapture) { uri ->
-                                onMediaCaptured(uri, false) // False = Photo
+                                onMediaCaptured(uri, false)
                             }
                         }
                     },
@@ -216,38 +206,38 @@ fun CameraScreen(
                         .padding(top = 24.dp)
                         .size(80.dp)
                 ) {
-                    // Visual change for recording state
                     Box(
                         modifier = Modifier
                             .size(if (isVideoMode && isRecording) 40.dp else 70.dp)
                             .clip(if (isVideoMode && isRecording) RoundedCornerShape(8.dp) else CircleShape)
                             .background(if (isVideoMode) Color.Red else Color.White)
-                            .border(2.dp, Color.White, if (isVideoMode && isRecording) RoundedCornerShape(8.dp) else CircleShape)
+                            .border(
+                                2.dp,
+                                Color.White,
+                                if (isVideoMode && isRecording) RoundedCornerShape(8.dp) else CircleShape
+                            )
                     )
                 }
             }
         }
 
-        // Back Button
         IconButton(
             onClick = {
-                activeRecording?.stop() // Ensure recording stops if we exit
+                activeRecording?.stop()
+                activeRecording = null
+                isRecording = false
                 onCancelled()
             },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(16.dp)
         ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Cancel",
-                tint = Color.White
-            )
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel", tint = Color.White)
         }
     }
 }
 
-// --- HELPER FUNCTIONS ---
+// ---------- Helpers ----------
 
 private fun takePhoto(
     context: Context,
@@ -271,6 +261,7 @@ private fun takePhoto(
 
             override fun onError(exc: ImageCaptureException) {
                 Log.e("CameraScreen", "Photo capture failed: ${exc.message}", exc)
+                Toast.makeText(context, "Photo error: ${exc.message}", Toast.LENGTH_SHORT).show()
             }
         }
     )
@@ -292,25 +283,23 @@ private fun recordVideo(
     return videoCapture.output
         .prepareRecording(context, outputOptions)
         .apply {
-            // Check permission before enabling audio to avoid crashes
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED
+            ) {
                 withAudioEnabled()
             }
         }
-        .start(ContextCompat.getMainExecutor(context)) { recordEvent ->
-            when (recordEvent) {
-                is VideoRecordEvent.Start -> {
-                    Toast.makeText(context, "Recording Started", Toast.LENGTH_SHORT).show()
-                }
+        .start(ContextCompat.getMainExecutor(context)) { event ->
+            when (event) {
+                is VideoRecordEvent.Start ->
+                    Toast.makeText(context, "Recording started", Toast.LENGTH_SHORT).show()
+
                 is VideoRecordEvent.Finalize -> {
-                    if (!recordEvent.hasError()) {
-                        val msg = "Video saved: ${videoFile.absolutePath}"
-                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    if (!event.hasError()) {
                         onVideoSaved(Uri.fromFile(videoFile))
                     } else {
-                        // Handle error (e.g. out of space)
-                        Log.e("CameraScreen", "Video capture failed: ${recordEvent.error}")
-                        Toast.makeText(context, "Video Error: ${recordEvent.error}", Toast.LENGTH_SHORT).show()
+                        Log.e("CameraScreen", "Video capture failed: ${event.error}")
+                        Toast.makeText(context, "Video error: ${event.error}", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
