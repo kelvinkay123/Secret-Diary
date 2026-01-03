@@ -31,6 +31,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,7 +42,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import com.example.secretdiary.ui.theme.viewmodel.DiaryDetailViewModel
 
@@ -60,6 +64,8 @@ fun DiaryDetailScreen(
     val location by viewModel.location.collectAsState()
 
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     var hasLocationPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -73,31 +79,47 @@ fun DiaryDetailScreen(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { isGranted ->
             hasLocationPermission = isGranted
-            if (isGranted) {
-                viewModel.loadLocation()
-            }
+            if (isGranted) viewModel.loadLocation()
         }
     )
 
+    // Load entry once (when editing)
     LaunchedEffect(entryId) {
-        if (entryId != -1) {
-            viewModel.loadEntry(entryId)
-        }
+        if (entryId != -1) viewModel.loadEntry(entryId)
     }
 
-    LaunchedEffect(savedStateHandle, hasLocationPermission) {
-        savedStateHandle?.getLiveData<String>("image_uri")?.observeForever { uri ->
-            if (uri != null) {
-                viewModel.onImageUriChange(uri)
-                savedStateHandle.remove<String>("image_uri")
+    /**
+     * ✅ FIXED:
+     * - Reads NEW keys: "media_uri" + "is_video"
+     * - No observeForever leaks
+     * - Triggers reliably when coming back from CameraScreen (ON_RESUME)
+     */
+    DisposableEffect(lifecycleOwner, savedStateHandle) {
+        if (savedStateHandle == null) return@DisposableEffect onDispose { }
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val uriString = savedStateHandle.get<String>("media_uri")
+                val isVideo = savedStateHandle.get<Boolean>("is_video") ?: false
+
+                if (!uriString.isNullOrBlank()) {
+                    // ✅ this makes onMediaCaptured USED and also saves image/video correctly
+                    viewModel.onMediaCaptured(uriString, isVideo)
+
+                    savedStateHandle.remove<String>("media_uri")
+                    savedStateHandle.remove<Boolean>("is_video")
+                }
             }
         }
 
-        savedStateHandle?.getLiveData<Boolean>("is_video")?.observeForever { _ ->
-            savedStateHandle.remove<Boolean>("is_video")
-        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
-        if (hasLocationPermission && entry?.latitude == null) {
+    // Auto-load location for new entries (only if not already set)
+    LaunchedEffect(hasLocationPermission, entry?.latitude, location) {
+        val hasAnyLocation = (entry?.latitude != null) || (location != null)
+        if (hasLocationPermission && !hasAnyLocation) {
             viewModel.loadLocation()
         }
     }
@@ -114,19 +136,23 @@ fun DiaryDetailScreen(
                 actions = {
                     val isLocationSet = entry?.latitude != null || location != null
 
-                    IconButton(onClick = {
-                        if (hasLocationPermission) {
-                            viewModel.loadLocation()
-                        } else {
-                            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                    IconButton(
+                        onClick = {
+                            if (hasLocationPermission) {
+                                viewModel.loadLocation()
+                            } else {
+                                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                            }
                         }
-                    }) {
+                    ) {
                         Icon(
                             imageVector = Icons.Default.LocationOn,
                             contentDescription = "Get Location",
-                            // CHANGE: Added modifier to increase size to 32.dp (default is 24.dp)
                             modifier = Modifier.size(32.dp),
-                            tint = if (isLocationSet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = if (isLocationSet)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -147,10 +173,12 @@ fun DiaryDetailScreen(
             }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = {
-                viewModel.saveEntry()
-                onNavigateBack()
-            }) {
+            FloatingActionButton(
+                onClick = {
+                    viewModel.saveEntry()
+                    onNavigateBack()
+                }
+            ) {
                 Icon(Icons.Default.Done, contentDescription = "Save Entry")
             }
         }
@@ -174,6 +202,7 @@ fun DiaryDetailScreen(
                 location != null -> "📍 ${location?.latitude}, ${location?.longitude}"
                 else -> null
             }
+
             if (locationText != null) {
                 Text(
                     text = locationText,
@@ -183,18 +212,18 @@ fun DiaryDetailScreen(
                 )
             }
 
-            // Expanded Text Field
             OutlinedTextField(
                 value = entry?.content ?: "",
                 onValueChange = { viewModel.onContentChange(it) },
                 label = { Text("What's on your mind?") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f) // Fills remaining vertical space
+                    .weight(1f)
             )
 
+            // Preview last captured media
             imageUri?.let { uri ->
-                if (uri.isNotEmpty()) {
+                if (uri.isNotBlank()) {
                     AsyncImage(
                         model = uri,
                         contentDescription = "Captured media",
