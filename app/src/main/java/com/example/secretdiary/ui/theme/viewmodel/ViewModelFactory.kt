@@ -2,7 +2,6 @@ package com.example.secretdiary.ui.theme.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import com.example.secretdiary.ui.theme.viewmodel.DiaryRepository
 import com.example.secretdiary.data.location.LocationHelper
 
 class ViewModelFactory(

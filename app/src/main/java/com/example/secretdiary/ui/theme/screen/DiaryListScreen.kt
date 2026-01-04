@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -45,6 +46,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -58,6 +60,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.SavedStateHandle
 import com.example.secretdiary.data.location.LocationHelper
 import com.example.secretdiary.ui.theme.calendar.EnhancedCalendarView
 import com.example.secretdiary.ui.theme.viewmodel.DiaryEntry
@@ -75,32 +80,56 @@ import java.util.Locale
 fun DiaryListScreen(
     viewModel: DiaryListViewModel,
     onAddEntry: () -> Unit,
-    onEntryClick: (Int) -> Unit
+    onEntryClick: (Int) -> Unit,
+
+    // ✅ NEW (matches AppNavigation)
+    onOpenCamera: () -> Unit,
+    onCreateEntryWithMedia: (String, Boolean) -> Unit,
+    savedStateHandle: SavedStateHandle?
 ) {
     // 1. Collect State
     val entriesState by viewModel.allEntries.collectAsState()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
     // 2. UI State
     var searchQuery by remember { mutableStateOf("") }
     var showCalendar by remember { mutableStateOf(false) }
     var deleteEntryToConfirm by remember { mutableStateOf<DiaryEntry?>(null) }
 
-    // NEW: Location State
+    // Location State
     var currentLocationName by remember { mutableStateOf<String?>(null) }
 
     val listState = rememberLazyListState()
-
-    // Date Formatter
     val dateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd, yyyy") }
 
-    // --- NEW: Fetch Location Logic ---
+    // ✅ Listen for CameraScreen result coming back to DiaryList
+    DisposableEffect(lifecycleOwner, savedStateHandle) {
+        if (savedStateHandle == null) return@DisposableEffect onDispose { }
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val uriString = savedStateHandle.get<String>("media_uri")
+                val isVideo = savedStateHandle.get<Boolean>("is_video") ?: false
+
+                if (!uriString.isNullOrBlank()) {
+                    onCreateEntryWithMedia(uriString, isVideo)
+                    savedStateHandle.remove<String>("media_uri")
+                    savedStateHandle.remove<Boolean>("is_video")
+                }
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Fetch Location
     LaunchedEffect(Unit) {
         val locationHelper = LocationHelper(context)
         locationHelper.getCurrentLocation { location ->
             if (location != null) {
-                // Geocoding must happen on a background thread (IO)
                 coroutineScope.launch(Dispatchers.IO) {
                     try {
                         val geocoder = Geocoder(context, Locale.getDefault())
@@ -110,7 +139,6 @@ fun DiaryListScreen(
                             val address = addresses[0]
                             val city = address.locality ?: address.subAdminArea ?: "Unknown"
                             val country = address.countryCode ?: ""
-                            // Update state on Main thread
                             withContext(Dispatchers.Main) {
                                 currentLocationName = if (country.isNotEmpty()) "$city, $country" else city
                             }
@@ -152,7 +180,7 @@ fun DiaryListScreen(
         }
     }
 
-    // Dialog Logic
+    // Delete dialog
     deleteEntryToConfirm?.let { entry ->
         AlertDialog(
             onDismissRequest = { deleteEntryToConfirm = null },
@@ -178,14 +206,13 @@ fun DiaryListScreen(
             TopAppBar(
                 title = { Text("My Diary") },
                 actions = {
-                    // --- NEW: Display Location in Top Right ---
                     AnimatedVisibility(visible = currentLocationName != null, enter = fadeIn()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(end = 8.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Place, // Ensure this icon is imported
+                                imageVector = Icons.Default.Place,
                                 contentDescription = "Location",
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.primary
@@ -199,7 +226,6 @@ fun DiaryListScreen(
                         }
                     }
 
-                    // Existing Calendar Toggle
                     IconButton(onClick = { showCalendar = !showCalendar }) {
                         Icon(
                             imageVector = if (showCalendar) Icons.Default.Close else Icons.Default.DateRange,
@@ -211,6 +237,7 @@ fun DiaryListScreen(
         },
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End) {
+
                 AnimatedVisibility(
                     visible = showScrollToTop,
                     enter = fadeIn(),
@@ -224,6 +251,15 @@ fun DiaryListScreen(
                         Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Top")
                     }
                 }
+
+                // ✅ Camera / Video FAB
+                FloatingActionButton(
+                    onClick = onOpenCamera,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    Icon(Icons.Default.Videocam, contentDescription = "Camera")
+                }
+
                 FloatingActionButton(onClick = onAddEntry) {
                     Icon(Icons.Default.Add, contentDescription = "Add")
                 }
@@ -272,7 +308,8 @@ fun DiaryListScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    val emptyMessage = if (entriesState.isEmpty()) "Your diary is empty." else "No results found."
+                    val emptyMessage =
+                        if (entriesState.isEmpty()) "Your diary is empty." else "No results found."
                     Text(emptyMessage)
                 }
             } else {

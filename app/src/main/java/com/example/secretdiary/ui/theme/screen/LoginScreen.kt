@@ -15,13 +15,15 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
-import com.example.secretdiary.ui.theme.navigation.Screen
 import com.example.secretdiary.ui.theme.SecretDiaryTheme
+import com.example.secretdiary.ui.theme.navigation.Screen
 import com.google.firebase.auth.FirebaseAuth
 
 @Composable
-fun LoginScreen(navController: NavController) {
-
+fun LoginScreen(
+    navController: NavController,
+    onBiometricUnlock: () -> Unit
+) {
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var isLoading by rememberSaveable { mutableStateOf(false) }
@@ -35,7 +37,6 @@ fun LoginScreen(navController: NavController) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-
         Text(
             text = "Login",
             style = MaterialTheme.typography.headlineLarge,
@@ -74,6 +75,7 @@ fun LoginScreen(navController: NavController) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // ---------- Normal Login ----------
         Button(
             onClick = {
                 if (email.isNotBlank() && password.isNotBlank()) {
@@ -84,7 +86,7 @@ fun LoginScreen(navController: NavController) {
                             isLoading = false
                             if (task.isSuccessful) {
                                 Toast.makeText(context, "Login successful!", Toast.LENGTH_SHORT).show()
-                                navController.navigate(Screen.Biometric.route) {
+                                navController.navigate(Screen.DiaryList.route) {
                                     popUpTo(Screen.Login.route) { inclusive = true }
                                 }
                             } else {
@@ -109,6 +111,24 @@ fun LoginScreen(navController: NavController) {
             }
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // ✅ FIX: Biometric button is now a normal Button (same color as Login)
+        Button(
+            onClick = { onBiometricUnlock() },
+            enabled = !isLoading,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+        ) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Unlock with Biometrics")
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         TextButton(
@@ -126,6 +146,9 @@ fun LoginScreen(navController: NavController) {
 fun LoginScreenPreview() {
     val navController = rememberNavController()
     SecretDiaryTheme {
-        LoginScreen(navController = navController)
+        LoginScreen(
+            navController = navController,
+            onBiometricUnlock = { /* preview */ }
+        )
     }
 }

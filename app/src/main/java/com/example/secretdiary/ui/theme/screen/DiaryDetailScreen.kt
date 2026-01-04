@@ -1,28 +1,36 @@
 package com.example.secretdiary.ui.theme.screen
 
-import android.Manifest
 import android.annotation.SuppressLint
-import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material3.BottomAppBar
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,64 +44,59 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import coil.compose.AsyncImage
+import coil.compose.rememberAsyncImagePainter
 import com.example.secretdiary.ui.theme.viewmodel.DiaryDetailViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
+private enum class AttachmentViewMode { GRID, LIST }
+
+private data class AttachmentItem(
+    val uri: String,
+    val isVideo: Boolean
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 fun DiaryDetailScreen(
     viewModel: DiaryDetailViewModel,
     entryId: Int,
     onNavigateBack: () -> Unit,
-    onOpenCamera: () -> Unit,
     savedStateHandle: SavedStateHandle?
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
     val entry by viewModel.entry.collectAsState()
-    val imageUri by viewModel.imageUri.collectAsState()
     val location by viewModel.location.collectAsState()
 
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    // Last captured media shown on this screen (photo OR video)
+    var lastCapturedUri by remember { mutableStateOf<String?>(null) }
+    var lastCapturedIsVideo by remember { mutableStateOf(false) }
 
-    var hasLocationPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
+    var viewMode by remember { mutableStateOf(AttachmentViewMode.GRID) }
 
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted ->
-            hasLocationPermission = isGranted
-            if (isGranted) viewModel.loadLocation()
-        }
-    )
-
-    // Load entry once (when editing)
     LaunchedEffect(entryId) {
         if (entryId != -1) viewModel.loadEntry(entryId)
     }
 
-    /**
-     * ✅ FIXED:
-     * - Reads NEW keys: "media_uri" + "is_video"
-     * - No observeForever leaks
-     * - Triggers reliably when coming back from CameraScreen (ON_RESUME)
-     */
+    // Reads result passed via savedStateHandle
     DisposableEffect(lifecycleOwner, savedStateHandle) {
         if (savedStateHandle == null) return@DisposableEffect onDispose { }
 
@@ -103,8 +106,10 @@ fun DiaryDetailScreen(
                 val isVideo = savedStateHandle.get<Boolean>("is_video") ?: false
 
                 if (!uriString.isNullOrBlank()) {
-                    // ✅ this makes onMediaCaptured USED and also saves image/video correctly
                     viewModel.onMediaCaptured(uriString, isVideo)
+
+                    lastCapturedUri = uriString
+                    lastCapturedIsVideo = isVideo
 
                     savedStateHandle.remove<String>("media_uri")
                     savedStateHandle.remove<Boolean>("is_video")
@@ -116,123 +121,359 @@ fun DiaryDetailScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Auto-load location for new entries (only if not already set)
-    LaunchedEffect(hasLocationPermission, entry?.latitude, location) {
-        val hasAnyLocation = (entry?.latitude != null) || (location != null)
-        if (hasLocationPermission && !hasAnyLocation) {
-            viewModel.loadLocation()
-        }
+    // Parse attachments from content
+    val attachments: List<AttachmentItem> = remember(entry?.content) {
+        extractAttachmentsFromContent(entry?.content.orEmpty())
     }
+
+    val scrollState = rememberScrollState()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (entryId == -1) "New Entry" else "Edit Entry") },
+                title = { Text("Diary Entry") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                },
-                actions = {
-                    val isLocationSet = entry?.latitude != null || location != null
-
-                    IconButton(
-                        onClick = {
-                            if (hasLocationPermission) {
-                                viewModel.loadLocation()
-                            } else {
-                                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                            }
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.LocationOn,
-                            contentDescription = "Get Location",
-                            modifier = Modifier.size(32.dp),
-                            tint = if (isLocationSet)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
             )
-        },
-        bottomBar = {
-            BottomAppBar {
-                Button(
-                    onClick = onOpenCamera,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                ) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = "Open Camera")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add Photo / Video")
-                }
-            }
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    viewModel.saveEntry()
-                    onNavigateBack()
-                }
-            ) {
-                Icon(Icons.Default.Done, contentDescription = "Save Entry")
-            }
         }
-    ) { paddingValues ->
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .verticalScroll(scrollState)
+                // ✅ IMPORTANT: respect TopAppBar padding so nothing overlaps
+                .padding(innerPadding)
+                // ✅ Wider screen: smaller side padding
+                .padding(horizontal = 8.dp)
         ) {
+            // ✅ Extra breathing room below the app bar title (optional)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ✅ TITLE heading
+            Text(
+                text = "Title",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // ✅ Title input
             OutlinedTextField(
-                value = entry?.title ?: "",
+                value = entry?.title.orEmpty(),
                 onValueChange = { viewModel.onTitleChange(it) },
-                label = { Text("Title") },
+                placeholder = { Text("Enter your title...") },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
 
-            val locationText = when {
-                entry?.latitude != null -> "📍 ${entry?.latitude}, ${entry?.longitude}"
-                location != null -> "📍 ${location?.latitude}, ${location?.longitude}"
-                else -> null
-            }
+            Spacer(modifier = Modifier.height(14.dp))
 
-            if (locationText != null) {
-                Text(
-                    text = locationText,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
-            }
+            // ✅ CONTENT heading
+            Text(
+                text = "Content",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
 
+            // ✅ Bigger content typing area
             OutlinedTextField(
-                value = entry?.content ?: "",
+                value = entry?.content.orEmpty(),
                 onValueChange = { viewModel.onContentChange(it) },
-                label = { Text("What's on your mind?") },
+                placeholder = { Text("Write your diary entry here...") },
+                singleLine = false,
+                maxLines = 50,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .height(420.dp)
             )
 
-            // Preview last captured media
-            imageUri?.let { uri ->
-                if (uri.isNotBlank()) {
-                    AsyncImage(
-                        model = uri,
-                        contentDescription = "Captured media",
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(
+                onClick = { viewModel.saveEntry(); onNavigateBack() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+            ) {
+                Text("Save")
+            }
+
+            // Last captured preview (photo OR video)
+            if (!lastCapturedUri.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Last captured:",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                if (lastCapturedIsVideo) {
+                    VideoThumbnail(
+                        context = context,
+                        uri = lastCapturedUri!!,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(150.dp)
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline,
+                                RoundedCornerShape(12.dp)
+                            )
+                    )
+                } else {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = lastCapturedUri),
+                        contentDescription = "Last image",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline,
+                                RoundedCornerShape(12.dp)
+                            ),
+                        contentScale = ContentScale.Crop
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Attachments header + toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Attachments (${attachments.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+
+                IconButton(onClick = {
+                    viewMode =
+                        if (viewMode == AttachmentViewMode.GRID) AttachmentViewMode.LIST
+                        else AttachmentViewMode.GRID
+                }) {
+                    Icon(
+                        imageVector = if (viewMode == AttachmentViewMode.GRID)
+                            Icons.AutoMirrored.Filled.List
+                        else
+                            Icons.Default.GridView,
+                        contentDescription = "Toggle view"
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (attachments.isEmpty()) {
+                Text(
+                    text = "No attachments yet. Capture from Diary List screen.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            } else {
+                if (viewMode == AttachmentViewMode.GRID) {
+                    AttachmentsGrid(items = attachments, onClick = { })
+                } else {
+                    AttachmentsList(items = attachments, onClick = { })
+                }
+            }
+
+            if (location != null) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Location: ${location!!.latitude}, ${location!!.longitude}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
+}
+
+// -------------------- UI: GRID --------------------
+@Composable
+private fun AttachmentsGrid(
+    items: List<AttachmentItem>,
+    onClick: (AttachmentItem) -> Unit
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(280.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(items) { item ->
+            if (item.isVideo) {
+                VideoTile(item, onClick)
+            } else {
+                ImageTile(item, onClick)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageTile(item: AttachmentItem, onClick: (AttachmentItem) -> Unit) {
+    Image(
+        painter = rememberAsyncImagePainter(model = item.uri),
+        contentDescription = "Image",
+        modifier = Modifier
+            .size(96.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
+            .clickable { onClick(item) },
+        contentScale = ContentScale.Crop
+    )
+}
+
+@Composable
+private fun VideoTile(item: AttachmentItem, onClick: (AttachmentItem) -> Unit) {
+    val context = LocalContext.current
+    VideoThumbnail(
+        context = context,
+        uri = item.uri,
+        modifier = Modifier
+            .size(96.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
+            .clickable { onClick(item) }
+    )
+}
+
+// -------------------- UI: LIST --------------------
+@Composable
+private fun AttachmentsList(
+    items: List<AttachmentItem>,
+    onClick: (AttachmentItem) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(280.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        items(items.size) { index ->
+            val item = items[index]
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+                    .clickable { onClick(item) }
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (item.isVideo) {
+                    val context = LocalContext.current
+                    VideoThumbnail(
+                        context = context,
+                        uri = item.uri,
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                    )
+                } else {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = item.uri),
+                        contentDescription = "Image",
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(10.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
+                Spacer(modifier = Modifier.size(12.dp))
+
+                Text(
+                    text = if (item.isVideo) "Video attachment" else "Image attachment",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+// -------------------- Video Thumbnail --------------------
+@Composable
+private fun VideoThumbnail(
+    context: Context,
+    uri: String,
+    modifier: Modifier = Modifier
+) {
+    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = uri) {
+        value = loadVideoThumbnail(context, uri)
+    }
+
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap!!.asImageBitmap(),
+            contentDescription = "Video thumbnail",
+            modifier = modifier,
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Column(
+            modifier = modifier.padding(10.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(Icons.Default.Videocam, contentDescription = "Video", modifier = Modifier.size(28.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+            Text("Video", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+private suspend fun loadVideoThumbnail(context: Context, uriString: String): Bitmap? {
+    return withContext(Dispatchers.IO) {
+        val retriever = MediaMetadataRetriever()
+        try {
+            val uri = uriString.toUri()
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                retriever.setDataSource(pfd.fileDescriptor)
+                retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {}
+        }
+    }
+}
+
+// -------------------- Parsing helpers --------------------
+private fun extractAttachmentsFromContent(content: String): List<AttachmentItem> {
+    val out = mutableListOf<AttachmentItem>()
+
+    Regex("""\[Image:\s*(.+?)]""").findAll(content).forEach { match ->
+        val uri = match.groupValues[1].trim()
+        if (uri.isNotBlank()) out.add(AttachmentItem(uri = uri, isVideo = false))
+    }
+
+    Regex("""\[Video:\s*(.+?)]""").findAll(content).forEach { match ->
+        val uri = match.groupValues[1].trim()
+        if (uri.isNotBlank()) out.add(AttachmentItem(uri = uri, isVideo = true))
+    }
+
+    return out.reversed()
 }
