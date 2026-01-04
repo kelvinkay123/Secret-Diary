@@ -81,12 +81,14 @@ fun AppNavigation(
             DiaryListScreen(
                 viewModel = viewModel(factory = viewModelFactory),
                 onAddEntry = { navController.navigate(Screen.diaryDetailRoute(-1)) },
-                onEntryClick = { entryId -> navController.navigate(Screen.diaryDetailRoute(entryId)) },
+                onEntryClick = { entryId ->
+                    navController.navigate(Screen.diaryDetailRoute(entryId))
+                },
 
-                // ✅ open camera from list
+                // open camera from list
                 onOpenCamera = { navController.navigate(Screen.Camera.route) },
 
-                // ✅ after capture, open detail(-1) and pass media into THAT detail savedStateHandle
+                // after capture, open detail(-1) and pass media into THAT detail savedStateHandle
                 onCreateEntryWithMedia = { uriString: String, isVideo: Boolean ->
                     navController.navigate(Screen.diaryDetailRoute(-1))
                     navController.currentBackStackEntry?.savedStateHandle?.apply {
@@ -95,14 +97,15 @@ fun AppNavigation(
                     }
                 },
 
-                // ✅ list reads camera result from here
+                // list reads camera result from here
                 savedStateHandle = backStackEntry.savedStateHandle
             )
         }
 
         // ---------- DIARY DETAIL ----------
         composable(route = "${Screen.DiaryDetail.route}/{entryId}") { backStackEntry ->
-            val entryId = backStackEntry.arguments?.getString("entryId")?.toIntOrNull() ?: -1
+            val entryId =
+                backStackEntry.arguments?.getString("entryId")?.toIntOrNull() ?: -1
 
             DiaryDetailScreen(
                 viewModel = viewModel(factory = viewModelFactory),
