@@ -102,6 +102,7 @@ dependencies {
     implementation(libs.google.play.services.location)
     implementation(libs.coil.compose)
 
+
     // --- Testing ---
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)

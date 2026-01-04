@@ -1,6 +1,10 @@
 package com.example.secretdiary.ui.theme.screen
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.location.Geocoder
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -16,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,7 +31,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
@@ -41,6 +44,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -54,12 +59,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.SavedStateHandle
@@ -82,27 +87,76 @@ fun DiaryListScreen(
     onAddEntry: () -> Unit,
     onEntryClick: (Int) -> Unit,
 
-    // ✅ NEW (matches AppNavigation)
+    // matches AppNavigation
     onOpenCamera: () -> Unit,
     onCreateEntryWithMedia: (String, Boolean) -> Unit,
     savedStateHandle: SavedStateHandle?
 ) {
-    // 1. Collect State
     val entriesState by viewModel.allEntries.collectAsState()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
-    // 2. UI State
-    var searchQuery by remember { mutableStateOf("") }
-    var showCalendar by remember { mutableStateOf(false) }
-    var deleteEntryToConfirm by remember { mutableStateOf<DiaryEntry?>(null) }
-
-    // Location State
-    var currentLocationName by remember { mutableStateOf<String?>(null) }
+    // ✅ Use MutableState explicitly to avoid IDE "assigned value is never read" warnings
+    val searchQuery = remember { mutableStateOf("") }
+    val showCalendar = remember { mutableStateOf(false) }
+    val deleteEntryToConfirm = remember { mutableStateOf<DiaryEntry?>(null) }
+    val currentLocationName = remember { mutableStateOf<String?>(null) }
 
     val listState = rememberLazyListState()
     val dateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd, yyyy") }
+
+    // ✅ Snackbar
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // ✅ Permission launcher (requests fine+coarse)
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = (results[Manifest.permission.ACCESS_FINE_LOCATION] == true) ||
+                (results[Manifest.permission.ACCESS_COARSE_LOCATION] == true)
+
+        if (granted) {
+            coroutineScope.launch { snackbarHostState.showSnackbar("Fetching location…") }
+            fetchLocation(
+                context = context,
+                coroutineScope = coroutineScope,
+                onLocationName = { currentLocationName.value = it },
+                onError = { msg -> coroutineScope.launch { snackbarHostState.showSnackbar(msg) } }
+            )
+        } else {
+            coroutineScope.launch { snackbarHostState.showSnackbar("Location permission denied.") }
+        }
+    }
+
+    // ✅ Tap icon → either request permission or refresh location
+    fun onLocationIconTap() {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!fineGranted && !coarseGranted) {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+            return
+        }
+
+        coroutineScope.launch { snackbarHostState.showSnackbar("Fetching location…") }
+        fetchLocation(
+            context = context,
+            coroutineScope = coroutineScope,
+            onLocationName = { currentLocationName.value = it },
+            onError = { msg -> coroutineScope.launch { snackbarHostState.showSnackbar(msg) } }
+        )
+    }
 
     // ✅ Listen for CameraScreen result coming back to DiaryList
     DisposableEffect(lifecycleOwner, savedStateHandle) {
@@ -125,36 +179,27 @@ fun DiaryListScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Fetch Location
+    // ✅ optional initial fetch (only if already permitted)
     LaunchedEffect(Unit) {
-        val locationHelper = LocationHelper(context)
-        locationHelper.getCurrentLocation { location ->
-            if (location != null) {
-                coroutineScope.launch(Dispatchers.IO) {
-                    try {
-                        val geocoder = Geocoder(context, Locale.getDefault())
-                        @Suppress("DEPRECATION")
-                        val addresses = geocoder.getFromLocation(location.latitude, location.longitude, 1)
-                        if (!addresses.isNullOrEmpty()) {
-                            val address = addresses[0]
-                            val city = address.locality ?: address.subAdminArea ?: "Unknown"
-                            val country = address.countryCode ?: ""
-                            withContext(Dispatchers.Main) {
-                                currentLocationName = if (country.isNotEmpty()) "$city, $country" else city
-                            }
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-            }
+        val fineGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (fineGranted || coarseGranted) {
+            fetchLocation(
+                context = context,
+                coroutineScope = coroutineScope,
+                onLocationName = { currentLocationName.value = it },
+                onError = { /* silent on start */ }
+            )
         }
     }
 
-    // Derived States
-    val showScrollToTop by remember {
-        derivedStateOf { listState.firstVisibleItemIndex > 0 }
-    }
+    val showScrollToTop by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
 
     val entryDates = remember(entriesState) {
         entriesState.map {
@@ -164,8 +209,8 @@ fun DiaryListScreen(
         }
     }
 
-    val filteredList = remember(searchQuery, entriesState) {
-        if (searchQuery.isBlank()) {
+    val filteredList = remember(searchQuery.value, entriesState) {
+        if (searchQuery.value.isBlank()) {
             entriesState
         } else {
             entriesState.filter { entry ->
@@ -173,71 +218,74 @@ fun DiaryListScreen(
                     .atZone(ZoneId.systemDefault())
                     .format(dateFormatter)
 
-                entry.title.contains(searchQuery, ignoreCase = true) ||
-                        entry.content.contains(searchQuery, ignoreCase = true) ||
-                        dateStr.contains(searchQuery, ignoreCase = true)
+                entry.title.contains(searchQuery.value, ignoreCase = true) ||
+                        entry.content.contains(searchQuery.value, ignoreCase = true) ||
+                        dateStr.contains(searchQuery.value, ignoreCase = true)
             }
         }
     }
 
-    // Delete dialog
-    deleteEntryToConfirm?.let { entry ->
+    deleteEntryToConfirm.value?.let { entry ->
         AlertDialog(
-            onDismissRequest = { deleteEntryToConfirm = null },
+            onDismissRequest = { deleteEntryToConfirm.value = null },
             title = { Text("Delete Entry?") },
             text = { Text("Are you sure you want to delete \"${entry.title}\"?") },
             confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.deleteEntry(entry)
-                        deleteEntryToConfirm = null
+                        deleteEntryToConfirm.value = null
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text("Delete") }
             },
             dismissButton = {
-                TextButton(onClick = { deleteEntryToConfirm = null }) { Text("Cancel") }
+                TextButton(onClick = { deleteEntryToConfirm.value = null }) { Text("Cancel") }
             }
         )
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("My Diary") },
                 actions = {
-                    AnimatedVisibility(visible = currentLocationName != null, enter = fadeIn()) {
+                    IconButton(onClick = { onLocationIconTap() }) {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Get help location",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    IconButton(onClick = { showCalendar.value = !showCalendar.value }) {
+                        Icon(
+                            imageVector = if (showCalendar.value) Icons.Default.Close else Icons.Default.DateRange,
+                            contentDescription = "Toggle Calendar"
+                        )
+                    }
+
+                    AnimatedVisibility(visible = currentLocationName.value != null, enter = fadeIn()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(end = 8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Place,
-                                contentDescription = "Location",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = currentLocationName ?: "",
+                                text = currentLocationName.value ?: "",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                    }
-
-                    IconButton(onClick = { showCalendar = !showCalendar }) {
-                        Icon(
-                            imageVector = if (showCalendar) Icons.Default.Close else Icons.Default.DateRange,
-                            contentDescription = "Toggle Calendar"
-                        )
                     }
                 }
             )
         },
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End) {
-
                 AnimatedVisibility(
                     visible = showScrollToTop,
                     enter = fadeIn(),
@@ -252,7 +300,6 @@ fun DiaryListScreen(
                     }
                 }
 
-                // ✅ Camera / Video FAB
                 FloatingActionButton(
                     onClick = onOpenCamera,
                     modifier = Modifier.padding(bottom = 12.dp)
@@ -272,27 +319,27 @@ fun DiaryListScreen(
                 .padding(innerPadding)
         ) {
             AnimatedVisibility(
-                visible = showCalendar,
+                visible = showCalendar.value,
                 enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
             ) {
                 EnhancedCalendarView(
                     entryDates = entryDates,
                     onDateSelected = { selectedDate ->
-                        searchQuery = selectedDate.format(dateFormatter)
-                        showCalendar = false
+                        searchQuery.value = selectedDate.format(dateFormatter)
+                        showCalendar.value = false
                     }
                 )
             }
 
             TextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
+                value = searchQuery.value,
+                onValueChange = { searchQuery.value = it },
                 placeholder = { Text("Search diary...") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
+                    if (searchQuery.value.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery.value = "" }) {
                             Icon(Icons.Default.Clear, contentDescription = "Clear")
                         }
                     }
@@ -325,10 +372,49 @@ fun DiaryListScreen(
                             entry = entry,
                             formatter = dateFormatter,
                             onClick = { onEntryClick(entry.id) },
-                            onDelete = { deleteEntryToConfirm = entry }
+                            onDelete = { deleteEntryToConfirm.value = entry }
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * ✅ Shared fetch function (called on start + on icon tap)
+ */
+private fun fetchLocation(
+    context: android.content.Context,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    onLocationName: (String) -> Unit,
+    onError: (String) -> Unit
+) {
+    val locationHelper = LocationHelper(context)
+    locationHelper.getCurrentLocation { location ->
+        if (location == null) {
+            onError("Location unavailable.")
+            return@getCurrentLocation
+        }
+
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val geocoder = Geocoder(context, Locale.getDefault())
+                @Suppress("DEPRECATION")
+                val addresses = geocoder.getFromLocation(location.latitude, location.longitude, 1)
+
+                if (!addresses.isNullOrEmpty()) {
+                    val address = addresses[0]
+                    val city = address.locality ?: address.subAdminArea ?: "Unknown"
+                    val country = address.countryCode ?: ""
+                    val label = if (country.isNotEmpty()) "$city, $country" else city
+
+                    withContext(Dispatchers.Main) { onLocationName(label) }
+                } else {
+                    withContext(Dispatchers.Main) { onError("Location unavailable.") }
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) { onError("Location unavailable.") }
             }
         }
     }
