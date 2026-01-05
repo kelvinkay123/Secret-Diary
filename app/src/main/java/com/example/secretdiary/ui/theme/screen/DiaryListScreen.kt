@@ -10,31 +10,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -62,10 +45,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
@@ -107,9 +93,20 @@ fun DiaryListScreen(
     val deleteEntryToConfirm = remember { mutableStateOf<DiaryEntry?>(null) }
     val currentLocationName = remember { mutableStateOf<String?>(null) }
 
+    // ✅ Fullscreen media state (uri + isVideo)
+    val fullscreenMedia = remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+
+    // ✅ Show fullscreen viewer when media selected
+    fullscreenMedia.value?.let { (uri, isVideo) ->
+        FullscreenMediaViewer(
+            mediaUri = uri,
+            isVideo = isVideo,
+            onDismiss = { fullscreenMedia.value = null }
+        )
+    }
+
     val listState = rememberLazyListState()
     val dateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd, yyyy") }
-
     val snackbarHostState = remember { SnackbarHostState() }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -159,6 +156,7 @@ fun DiaryListScreen(
         )
     }
 
+    // ✅ Listen for CameraScreen result coming back to DiaryList
     DisposableEffect(lifecycleOwner, savedStateHandle) {
         if (savedStateHandle == null) return@DisposableEffect onDispose { }
 
@@ -179,6 +177,7 @@ fun DiaryListScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // ✅ optional initial fetch (only if already permitted)
     LaunchedEffect(Unit) {
         val fineGranted = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_FINE_LOCATION
@@ -238,9 +237,7 @@ fun DiaryListScreen(
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text("Delete") }
             },
-            dismissButton = {
-                TextButton(onClick = { deleteEntryToConfirm.value = null }) { Text("Cancel") }
-            }
+            dismissButton = { TextButton(onClick = { deleteEntryToConfirm.value = null }) { Text("Cancel") } }
         )
     }
 
@@ -253,7 +250,7 @@ fun DiaryListScreen(
                     IconButton(onClick = { onLocationIconTap() }) {
                         Icon(
                             imageVector = Icons.Default.MyLocation,
-                            contentDescription = "Get help location",
+                            contentDescription = "Get location",
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -371,7 +368,10 @@ fun DiaryListScreen(
                             entry = entry,
                             formatter = dateFormatter,
                             onClick = { onEntryClick(entry.id) },
-                            onDelete = { deleteEntryToConfirm.value = entry }
+                            onDelete = { deleteEntryToConfirm.value = entry },
+                            onMediaClick = { uri, isVideo ->
+                                fullscreenMedia.value = uri to isVideo
+                            }
                         )
                     }
                 }
@@ -380,9 +380,6 @@ fun DiaryListScreen(
     }
 }
 
-/**
- * ✅ Shared fetch function (called on start + on icon tap)
- */
 private fun fetchLocation(
     context: android.content.Context,
     coroutineScope: kotlinx.coroutines.CoroutineScope,
@@ -422,7 +419,8 @@ private fun fetchLocation(
 @Composable
 private fun VideoPlayerView(
     videoUri: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    playWhenReady: Boolean = false
 ) {
     val context = LocalContext.current
 
@@ -430,7 +428,7 @@ private fun VideoPlayerView(
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(videoUri.toUri()))
             prepare()
-            playWhenReady = false
+            this.playWhenReady = playWhenReady
         }
     }
 
@@ -453,11 +451,62 @@ private fun VideoPlayerView(
 }
 
 @Composable
+private fun FullscreenMediaViewer(
+    mediaUri: String,
+    isVideo: Boolean,
+    onDismiss: () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false, // ✅ true fullscreen
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = Color.White
+                )
+            }
+
+            if (isVideo) {
+                VideoPlayerView(
+                    videoUri = mediaUri,
+                    playWhenReady = true,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                AsyncImage(
+                    model = mediaUri,
+                    contentDescription = "Fullscreen image",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit // ✅ shows whole image without cropping
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun DiaryEntryItem(
     entry: DiaryEntry,
     formatter: DateTimeFormatter,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onMediaClick: (String, Boolean) -> Unit
 ) {
     val dateString = remember(entry.timestamp) {
         Instant.ofEpochMilli(entry.timestamp)
@@ -474,7 +523,6 @@ fun DiaryEntryItem(
     ) {
         Box(modifier = Modifier.padding(16.dp)) {
             Column(modifier = Modifier.fillMaxWidth().padding(end = 40.dp)) {
-
                 Text(
                     text = entry.title,
                     style = MaterialTheme.typography.titleMedium,
@@ -492,12 +540,24 @@ fun DiaryEntryItem(
 
                 // 🎥 VIDEO
                 if (entry.isVideo && !entry.mediaUri.isNullOrBlank()) {
-                    VideoPlayerView(
-                        videoUri = entry.mediaUri,
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
-                    )
+                    ) {
+                        VideoPlayerView(
+                            videoUri = entry.mediaUri,
+                            modifier = Modifier.fillMaxSize(),
+                            playWhenReady = false
+                        )
+
+                        // ✅ Transparent overlay to capture taps (PlayerView eats clicks)
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable { onMediaClick(entry.mediaUri, true) }
+                        )
+                    }
 
                     // 📷 IMAGE
                 } else if (!entry.imageUri.isNullOrBlank()) {
@@ -507,6 +567,7 @@ fun DiaryEntryItem(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(200.dp)
+                            .clickable { onMediaClick(entry.imageUri, false) }
                     )
 
                     // 📝 TEXT ONLY
