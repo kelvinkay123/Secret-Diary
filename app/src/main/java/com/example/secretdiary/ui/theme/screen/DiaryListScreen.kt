@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -64,10 +65,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.SavedStateHandle
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
 import com.example.secretdiary.data.location.LocationHelper
 import com.example.secretdiary.ui.theme.calendar.EnhancedCalendarView
 import com.example.secretdiary.ui.theme.viewmodel.DiaryEntry
@@ -86,8 +93,6 @@ fun DiaryListScreen(
     viewModel: DiaryListViewModel,
     onAddEntry: () -> Unit,
     onEntryClick: (Int) -> Unit,
-
-    // matches AppNavigation
     onOpenCamera: () -> Unit,
     onCreateEntryWithMedia: (String, Boolean) -> Unit,
     savedStateHandle: SavedStateHandle?
@@ -97,7 +102,6 @@ fun DiaryListScreen(
     val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
-    // ✅ Use MutableState explicitly to avoid IDE "assigned value is never read" warnings
     val searchQuery = remember { mutableStateOf("") }
     val showCalendar = remember { mutableStateOf(false) }
     val deleteEntryToConfirm = remember { mutableStateOf<DiaryEntry?>(null) }
@@ -106,10 +110,8 @@ fun DiaryListScreen(
     val listState = rememberLazyListState()
     val dateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd, yyyy") }
 
-    // ✅ Snackbar
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // ✅ Permission launcher (requests fine+coarse)
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -129,7 +131,6 @@ fun DiaryListScreen(
         }
     }
 
-    // ✅ Tap icon → either request permission or refresh location
     fun onLocationIconTap() {
         val fineGranted = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_FINE_LOCATION
@@ -158,7 +159,6 @@ fun DiaryListScreen(
         )
     }
 
-    // ✅ Listen for CameraScreen result coming back to DiaryList
     DisposableEffect(lifecycleOwner, savedStateHandle) {
         if (savedStateHandle == null) return@DisposableEffect onDispose { }
 
@@ -179,7 +179,6 @@ fun DiaryListScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ✅ optional initial fetch (only if already permitted)
     LaunchedEffect(Unit) {
         val fineGranted = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_FINE_LOCATION
@@ -194,7 +193,7 @@ fun DiaryListScreen(
                 context = context,
                 coroutineScope = coroutineScope,
                 onLocationName = { currentLocationName.value = it },
-                onError = { /* silent on start */ }
+                onError = { /* silent */ }
             )
         }
     }
@@ -421,6 +420,39 @@ private fun fetchLocation(
 }
 
 @Composable
+private fun VideoPlayerView(
+    videoUri: String,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+
+    val player = remember(videoUri) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(videoUri.toUri()))
+            prepare()
+            playWhenReady = false
+        }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                this.player = player
+                useController = true
+            }
+        },
+        update = { view ->
+            view.player = player
+        }
+    )
+}
+
+@Composable
 fun DiaryEntryItem(
     entry: DiaryEntry,
     formatter: DateTimeFormatter,
@@ -442,25 +474,52 @@ fun DiaryEntryItem(
     ) {
         Box(modifier = Modifier.padding(16.dp)) {
             Column(modifier = Modifier.fillMaxWidth().padding(end = 40.dp)) {
+
                 Text(
                     text = entry.title,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+
                 Text(
                     text = dateString,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = entry.content,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 🎥 VIDEO
+                if (entry.isVideo && !entry.mediaUri.isNullOrBlank()) {
+                    VideoPlayerView(
+                        videoUri = entry.mediaUri,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                    )
+
+                    // 📷 IMAGE
+                } else if (!entry.imageUri.isNullOrBlank()) {
+                    AsyncImage(
+                        model = entry.imageUri,
+                        contentDescription = "Diary image",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                    )
+
+                    // 📝 TEXT ONLY
+                } else {
+                    Text(
+                        text = entry.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
+
             IconButton(
                 onClick = onDelete,
                 modifier = Modifier.align(Alignment.TopEnd)

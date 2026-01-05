@@ -18,9 +18,11 @@ class DiaryDetailViewModel(
     private val _entry = MutableStateFlow<DiaryEntry?>(null)
     val entry = _entry.asStateFlow()
 
-    // Used by UI to preview last captured media (image OR video uri string)
-    private val _imageUri = MutableStateFlow<String?>(null)
-    val imageUri = _imageUri.asStateFlow()
+    // ✅ Preview for UI (can be image OR video)
+    private val _previewUri = MutableStateFlow<String?>(null)
+
+    @Suppress("unused") // UI may collect this later
+    val previewUri = _previewUri.asStateFlow()
 
     private val _location = MutableStateFlow<Location?>(null)
     val location = _location.asStateFlow()
@@ -30,18 +32,17 @@ class DiaryDetailViewModel(
     fun loadEntry(id: Int) {
         if (id == -1) return
 
-        // ✅ Prevent multiple collectors running at the same time
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             repository.getEntryById(id).collectLatest { diaryEntry ->
                 _entry.value = diaryEntry
-                _imageUri.value = extractLastMediaUriFromContent(diaryEntry?.content)
+                _previewUri.value = diaryEntry?.mediaUri ?: diaryEntry?.imageUri
             }
         }
     }
 
+    @Suppress("unused") // call from UI when you want auto-location
     fun loadLocation() {
-        // ✅ Only auto-load for NEW entries
         if (_entry.value == null || _entry.value?.id == 0) {
             viewModelScope.launch {
                 locationHelper.getCurrentLocation { loc ->
@@ -75,28 +76,41 @@ class DiaryDetailViewModel(
                 )
     }
 
-    /**
-     * Called after returning from CameraScreen.
-     * Stores the uri and appends a tag into content once.
-     */
     fun onMediaCaptured(uri: String, isVideo: Boolean) {
         if (uri.isBlank()) return
 
-        _imageUri.value = uri
+        val current = _entry.value ?: DiaryEntry(
+            id = 0,
+            title = "",
+            content = "",
+            timestamp = System.currentTimeMillis()
+        )
+
+        val cleanedContent = removeMediaTags(current.content)
 
         val tag = if (isVideo) "[Video: $uri]" else "[Image: $uri]"
-        val currentContent = _entry.value?.content.orEmpty()
+        val updatedContent = (cleanedContent + "\n" + tag).trim()
 
-        // ✅ Avoid duplicates
-        if (!currentContent.contains(tag)) {
-            val newContent = (currentContent + "\n" + tag).trim()
-            onContentChange(newContent)
+        _entry.value = if (isVideo) {
+            current.copy(
+                content = updatedContent,
+                mediaUri = uri,
+                isVideo = true,
+                imageUri = null
+            )
+        } else {
+            current.copy(
+                content = updatedContent,
+                imageUri = uri,
+                mediaUri = null,
+                isVideo = false
+            )
         }
+
+        _previewUri.value = uri
     }
 
-    /**
-     * Backwards compatible helper if any old code still calls it.
-     */
+    @Suppress("unused") // backwards compatible helper
     fun onImageUriChange(uri: String) {
         onMediaCaptured(uri = uri, isVideo = false)
     }
@@ -115,7 +129,6 @@ class DiaryDetailViewModel(
                 currentEntry
             }
 
-            // ✅ Insert vs update
             if (entryToSave.id == 0) {
                 repository.insert(entryToSave.copy(timestamp = System.currentTimeMillis()))
             } else {
@@ -124,18 +137,11 @@ class DiaryDetailViewModel(
         }
     }
 
-    private fun extractLastMediaUriFromContent(content: String?): String? {
-        if (content.isNullOrBlank()) return null
-
-        // Find last [Image: ...] or [Video: ...] line
-        val line = content.lines()
-            .lastOrNull { it.startsWith("[Image:") || it.startsWith("[Video:") }
-            ?: return null
-
-        return line
-            .removePrefix("[Image:")
-            .removePrefix("[Video:")
-            .removeSuffix("]")
+    private fun removeMediaTags(content: String): String {
+        if (content.isBlank()) return content
+        return content.lines()
+            .filterNot { it.trim().startsWith("[Image:") || it.trim().startsWith("[Video:") }
+            .joinToString("\n")
             .trim()
     }
 }

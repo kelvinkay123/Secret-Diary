@@ -84,6 +84,11 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.androidx.concurrent.futures)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
+    implementation(libs.coil.compose)
+
+
 
     // --- Firebase & Auth ---
     implementation(platform(libs.firebase.bom))
