@@ -4,9 +4,12 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import com.example.secretdiary.ui.theme.viewmodel.DiaryEntry
 
-@Database(entities = [DiaryEntry::class], version = 2, exportSchema = false, autoMigrations = [])
+@Database(
+    entities = [DiaryEntry::class],
+    version = 2,
+    exportSchema = false
+)
 abstract class DiaryDatabase : RoomDatabase() {
 
     abstract fun diaryDao(): DiaryDao
@@ -21,8 +24,10 @@ abstract class DiaryDatabase : RoomDatabase() {
                     context.applicationContext,
                     DiaryDatabase::class.java,
                     "diary_database"
-                ).fallbackToDestructiveMigration() // <-- temporary for development
+                )
+                    .fallbackToDestructiveMigration(true) // updated (new overload)
                     .build()
+
                 INSTANCE = instance
                 instance
             }
