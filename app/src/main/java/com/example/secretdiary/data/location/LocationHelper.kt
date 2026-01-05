@@ -7,24 +7,28 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
 import androidx.core.content.ContextCompat
-import com.google.android.gms.location.*
-import com.google.android.gms.tasks.CancellationTokenSource
-import kotlinx.coroutines.*
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import java.util.concurrent.atomic.AtomicBoolean
 
 class LocationHelper(context: Context) {
 
     private val appContext = context.applicationContext
     private val fusedClient = LocationServices.getFusedLocationProviderClient(appContext)
+    private val locationManager =
+        appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
     /**
      * Get current location:
-     * 1) Uses lastLocation (fast)
-     * 2) Uses getCurrentLocation (fresh)
-     * 3) If still null, requests one-time update
+     * 1) lastLocation (fast)
+     * 2) requestSingleUpdate (reliable on real phones)
+     * 3) fallback: LocationManager lastKnown
      */
     fun getCurrentLocation(
-        timeoutMs: Long = 8000L,
+        timeoutMs: Long = 12000L,
         onResult: (Location?) -> Unit
     ) {
         if (!hasLocationPermission()) {
@@ -33,74 +37,30 @@ class LocationHelper(context: Context) {
         }
 
         if (!isLocationEnabled()) {
-            // GPS / Location services are OFF
             onResult(null)
             return
         }
 
-        // Try last location first
-        tryLastLocation(timeoutMs, onResult)
-    }
-
-    private fun tryLastLocation(timeoutMs: Long, onResult: (Location?) -> Unit) {
-        try {
-            fusedClient.lastLocation
-                .addOnSuccessListener { loc ->
-                    if (loc != null) {
-                        onResult(loc)
-                    } else {
-                        tryGetCurrentLocation(timeoutMs, onResult)
-                    }
+        // 1) Try last known fused location first
+        tryLastLocation { last ->
+            if (last != null) {
+                onResult(last)
+            } else {
+                // 2) Force one update
+                requestSingleUpdate(timeoutMs) { fresh ->
+                    if (fresh != null) onResult(fresh)
+                    else onResult(getLastKnownFromLocationManager())
                 }
-                .addOnFailureListener {
-                    tryGetCurrentLocation(timeoutMs, onResult)
-                }
-        } catch (_: SecurityException) {
-            onResult(null)
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun tryGetCurrentLocation(timeoutMs: Long, onResult: (Location?) -> Unit) {
-        val tokenSource = CancellationTokenSource()
-
-        // Use HIGH only if FINE is granted, otherwise BALANCED for COARSE
-        val priority = if (hasFineLocationPermission()) {
-            Priority.PRIORITY_HIGH_ACCURACY
-        } else {
-            Priority.PRIORITY_BALANCED_POWER_ACCURACY
-        }
-
-        // Timeout guard (so we never hang)
-        val scope = CoroutineScope(Dispatchers.Main.immediate)
-        val finished = AtomicBoolean(false)
-
-        val timeoutJob = scope.launch {
-            delay(timeoutMs)
-            if (finished.compareAndSet(false, true)) {
-                tokenSource.cancel()
-                // If getCurrentLocation timed out, try one-time update request
-                requestSingleUpdate(timeoutMs, onResult)
             }
         }
+    }
 
+    private fun tryLastLocation(onResult: (Location?) -> Unit) {
         try {
-            fusedClient.getCurrentLocation(priority, tokenSource.token)
-                .addOnSuccessListener { fresh ->
-                    if (finished.compareAndSet(false, true)) {
-                        timeoutJob.cancel()
-                        if (fresh != null) onResult(fresh)
-                        else requestSingleUpdate(timeoutMs, onResult)
-                    }
-                }
-                .addOnFailureListener {
-                    if (finished.compareAndSet(false, true)) {
-                        timeoutJob.cancel()
-                        requestSingleUpdate(timeoutMs, onResult)
-                    }
-                }
+            fusedClient.lastLocation
+                .addOnSuccessListener { onResult(it) }
+                .addOnFailureListener { onResult(null) }
         } catch (_: SecurityException) {
-            timeoutJob.cancel()
             onResult(null)
         }
     }
@@ -108,7 +68,6 @@ class LocationHelper(context: Context) {
     @SuppressLint("MissingPermission")
     private fun requestSingleUpdate(timeoutMs: Long, onResult: (Location?) -> Unit) {
         val finished = AtomicBoolean(false)
-        val scope = CoroutineScope(Dispatchers.Main.immediate)
 
         val priority = if (hasFineLocationPermission()) {
             Priority.PRIORITY_HIGH_ACCURACY
@@ -131,14 +90,15 @@ class LocationHelper(context: Context) {
             }
         }
 
-        // Timeout guard for update request
-        val timeoutJob = scope.launch {
-            delay(timeoutMs)
+        // Timeout (runs on main thread, cancels updates if no result)
+        val handler = android.os.Handler(appContext.mainLooper)
+        val timeoutRunnable = Runnable {
             if (finished.compareAndSet(false, true)) {
                 fusedClient.removeLocationUpdates(callback)
                 onResult(null)
             }
         }
+        handler.postDelayed(timeoutRunnable, timeoutMs)
 
         try {
             fusedClient.requestLocationUpdates(
@@ -146,12 +106,34 @@ class LocationHelper(context: Context) {
                 callback,
                 appContext.mainLooper
             ).addOnFailureListener {
-                timeoutJob.cancel()
-                if (finished.compareAndSet(false, true)) onResult(null)
+                handler.removeCallbacks(timeoutRunnable)
+                if (finished.compareAndSet(false, true)) {
+                    onResult(null)
+                }
             }
         } catch (_: SecurityException) {
-            timeoutJob.cancel()
+            handler.removeCallbacks(timeoutRunnable)
             onResult(null)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun getLastKnownFromLocationManager(): Location? {
+        return try {
+            val providers = listOf(
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER
+            )
+
+            providers
+                .mapNotNull { provider ->
+                    if (locationManager.isProviderEnabled(provider)) {
+                        locationManager.getLastKnownLocation(provider)
+                    } else null
+                }
+                .maxByOrNull { it.time } // newest
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -172,10 +154,9 @@ class LocationHelper(context: Context) {
     }
 
     private fun isLocationEnabled(): Boolean {
-        val lm = appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         return try {
-            lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-                    lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         } catch (_: Exception) {
             false
         }
